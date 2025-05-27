@@ -1,4 +1,5 @@
 import pandas as pd
+import os
 import threading
 import queue
 import yfinance as yf
@@ -19,9 +20,12 @@ GOOGLE_SHEET_NAME = "Monthly ATH Stocks"
 ACTIVE_HOLDINGS_SHEET = "Active Holdings"
 USER_DIRECTORY_SHEET = "UserDirectory"
 
-TELEGRAM_BOT_TOKEN = "7621692516:AAH9k7G9CZ1V94796-ei5p0RBwKVF2UOQIs"
-GMAIL_USER = "sstrangersingh@gmail.com"
-GMAIL_APP_PASSWORD = "kxoo ycme kygo nryg"
+import os
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+GMAIL_USER = os.getenv("GMAIL_USER")
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
+
 
 CHECK_INTERVAL = 5 * 60  # 5 minutes
 
