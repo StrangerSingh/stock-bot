@@ -1,0 +1,6 @@
+pandas
+yfinance
+gspread
+oauth2client
+requests
+yagmail
