@@ -1,4 +1,4 @@
-import pandas as pd
+import pandas as pd 
 import os
 import threading
 import queue
@@ -20,12 +20,9 @@ GOOGLE_SHEET_NAME = "Monthly ATH Stocks"
 ACTIVE_HOLDINGS_SHEET = "Active Holdings"
 USER_DIRECTORY_SHEET = "UserDirectory"
 
-import os
-
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
-
 
 CHECK_INTERVAL = 5 * 60  # 5 minutes
 
@@ -35,7 +32,6 @@ yag = yagmail.SMTP(GMAIL_USER, GMAIL_APP_PASSWORD)
 # Start keep-alive web server
 keep_alive()
 
-
 def send_telegram_alert(chat_id, message):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     try:
@@ -43,13 +39,11 @@ def send_telegram_alert(chat_id, message):
     except Exception as e:
         print(f"[DEBUG] Telegram send error: {e}")
 
-
 def send_email_alert(email, subject, message):
     try:
         yag.send(to=email, subject=subject, contents=message)
     except Exception as e:
         print(f"[DEBUG] Email send error to {email}: {e}")
-
 
 # --- Multithreaded price fetcher using yfinance ---
 def fetch_price(symbol, out_q):
@@ -66,7 +60,6 @@ def fetch_price(symbol, out_q):
         print(f"[DEBUG] Error for {symbol}: {e}")
         out_q.put((symbol, None))
 
-
 def get_prices(symbols):
     threads = []
     out_q = queue.Queue()
@@ -82,7 +75,6 @@ def get_prices(symbols):
         result[sym] = price
     return result
 
-
 def load_sheets():
     # Load credentials and connect to Google Sheets
     scope = [
@@ -97,10 +89,12 @@ def load_sheets():
     active_sheet = client.open(GOOGLE_SHEET_NAME).worksheet(
         ACTIVE_HOLDINGS_SHEET)
     user_sheet = client.open(GOOGLE_SHEET_NAME).worksheet(USER_DIRECTORY_SHEET)
+    alert_log_sheet = client.open(GOOGLE_SHEET_NAME).worksheet("Alert_Log")
 
     ath_data = ath_sheet.get_all_records()
     user_data = user_sheet.get_all_records()
     active_data = active_sheet.get_all_records()
+    alert_log_data = alert_log_sheet.get_all_records()
 
     # Create user lookup map
     user_map = {}
@@ -110,8 +104,22 @@ def load_sheets():
                 "telegram_id": str(u.get("Telegram ID") or ""),
                 "email": u.get("Email", "").strip()
             }
-    return ath_data, user_map, active_data
+    return ath_data, user_map, active_data, alert_log_sheet, alert_log_data
 
+# --- Alert Log helpers ---
+def buy_alert_sent_this_month(alert_log_data, user, stock, year_month):
+    for record in alert_log_data:
+        if (record.get("User") == user and
+            record.get("Stock") == stock and
+            record.get("YearMonth") == year_month and
+            record.get("AlertType") == "buy"):
+            return True
+    return False
+
+def log_buy_alert_month(alert_log_sheet, user, stock, year_month):
+    alert_log_sheet.append_row([
+        user, stock, year_month, "buy", datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ])
 
 def main_loop():
     global alert_counters
@@ -120,9 +128,11 @@ def main_loop():
             f"\n[DEBUG] Scan started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
         try:
-            ath_data, user_map, active_data = load_sheets()
+            ath_data, user_map, active_data, alert_log_sheet, alert_log_data = load_sheets()
 
             # --- BUY SIGNAL LOGIC ---
+            now = datetime.now()
+            year_month = now.strftime("%Y-%m")
             stock_symbols = [row["Stock"] for row in ath_data if row["Stock"]]
             prices = get_prices(stock_symbols)
             print("[DEBUG] All prices fetched.")
@@ -141,8 +151,11 @@ def main_loop():
                 for user_name, user_info in user_map.items():
                     chat_id = user_info["telegram_id"]
                     email = user_info["email"]
+                    # Block alerts if already sent max allowed for this user-stock-month
+                    if buy_alert_sent_this_month(alert_log_data, user_name, stock, year_month):
+                        continue
                     if live_float > ath_float:
-                        alert_key = f"buy:{user_name}:{stock}:{ath_float}"
+                        alert_key = f"buy:{user_name}:{stock}:{ath_float}:{now.strftime('%Y-%m-%d')}"
                         prev_count = alert_counters.get(alert_key, 0)
                         if prev_count < MAX_ALERTS_PER_TRIGGER:
                             msg = f"📈 *BUY ALERT* for {stock}\nLive: ₹{live_float}\nATH: ₹{ath_float} (x{prev_count+1})"
@@ -152,6 +165,9 @@ def main_loop():
                                 send_email_alert(email,
                                                  f"BUY ALERT for {stock}", msg)
                             alert_counters[alert_key] = prev_count + 1
+                        # If this was the 5th alert for the day, log to Alert_Log so rest of month is blocked
+                        if alert_counters[alert_key] == MAX_ALERTS_PER_TRIGGER:
+                            log_buy_alert_month(alert_log_sheet, user_name, stock, year_month)
 
             print("[DEBUG] Buy Signal Monitor Cycle Done.")
 
@@ -220,7 +236,6 @@ def main_loop():
             f"[DEBUG] Waiting {CHECK_INTERVAL//60} minutes before next scan...\n"
         )
         time.sleep(CHECK_INTERVAL)
-
 
 if __name__ == "__main__":
     main_loop()
