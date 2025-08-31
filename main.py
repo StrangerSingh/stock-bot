@@ -124,6 +124,15 @@ def log_buy_alert_month(alert_log_sheet, user, stock, year_month):
 # --- NEW FEATURE: Initial Holdings Summary ---
 initial_holdings_sent = False
 
+def calculate_holding_days(buy_date_str):
+    """Calculate how many days a stock has been held."""
+    try:
+        buy_date = datetime.strptime(buy_date_str, "%Y-%m-%d").date()
+        today = datetime.now().date()
+        return (today - buy_date).days
+    except:
+        return None
+
 def send_initial_holdings_summary(active_data, user_map):
     print("[DEBUG] Sending initial holdings summary...")
     try:
@@ -140,14 +149,22 @@ def send_initial_holdings_summary(active_data, user_map):
                 sma_20m = float(row.get("SMA_20M") or 0)
             except:
                 continue
+
+            buy_date = row.get("Buy Date", "")
+            holding_days = calculate_holding_days(buy_date)
+            holding_info = f"{holding_days} days" if holding_days is not None else "N/A"
+
             user_name = row.get("Name")
             chat_id = user_map[user_name]["telegram_id"] if user_name in user_map else ""
             if not chat_id:
                 continue
+
             msg = (
                 f"📊 *ACTIVE HOLDING* for {stock}\n"
                 f"Live: ₹{live_price}\n"
                 f"Buy Price: ₹{buy_price}\n"
+                f"Buy Date: {buy_date}\n"
+                f"Held: {holding_info}\n"
                 f"SMA 20M: ₹{sma_20m}\n"
                 f"SMA 10M: ₹{sma_10m}"
             )
@@ -191,7 +208,6 @@ def main_loop():
                 for user_name, user_info in user_map.items():
                     chat_id = user_info["telegram_id"]
                     email = user_info["email"]
-                    # Block alerts if already sent max allowed for this user-stock-month
                     if buy_alert_sent_this_month(alert_log_data, user_name, stock, year_month):
                         continue
                     if live_float > ath_float:
@@ -205,7 +221,6 @@ def main_loop():
                                 send_email_alert(email,
                                                  f"BUY ALERT for {stock}", msg)
                             alert_counters[alert_key] = prev_count + 1
-                        # If this was the 5th alert for the day, log to Alert_Log so rest of month is blocked
                         if alert_counters[alert_key] == MAX_ALERTS_PER_TRIGGER:
                             log_buy_alert_month(alert_log_sheet, user_name, stock, year_month)
 
@@ -238,10 +253,8 @@ def main_loop():
                     )
                     continue
                 user_name = row.get("Name")
-                chat_id = user_map[user_name][
-                    "telegram_id"] if user_name in user_map else ""
-                email = user_map[user_name][
-                    "email"] if user_name in user_map else ""
+                chat_id = user_map[user_name]["telegram_id"] if user_name in user_map else ""
+                email = user_map[user_name]["email"] if user_name in user_map else ""
                 sell_signal = False
                 sell_reason = ""
                 if live_price < buy_price * 2:
@@ -262,9 +275,7 @@ def main_loop():
                         if email:
                             send_email_alert(email, f"SELL ALERT for {stock}",
                                              msg)
-                        print(
-                            f"[DEBUG] Sent sell alert for {stock} to {user_name}"
-                        )
+                        print(f"[DEBUG] Sent sell alert for {stock} to {user_name}")
                         alert_counters[alert_key] = prev_count + 1
 
             print("[DEBUG] Sell Signal Monitor Cycle Done.")
