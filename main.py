@@ -121,31 +121,38 @@ def log_buy_alert_month(alert_log_sheet, user, stock, year_month):
         user, stock, year_month, "buy", datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ])
 
-# --- NEW FEATURE: Initial Holdings Summary ---
-initial_holdings_sent = False
+# --- NEW FEATURE: Improved Date Parsing & Duration ---
+def parse_date(date_str):
+    """Parse date in either DD/MM/YYYY or YYYY-MM-DD."""
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(date_str, fmt).date()
+        except:
+            continue
+    return None
 
 def calculate_holding_days(buy_date_str):
     """Calculate human-readable holding duration like '2 years, 3 months, 5 days'."""
-    try:
-        buy_date = datetime.strptime(buy_date_str, "%Y-%m-%d").date()
-        today = datetime.now().date()
-        delta_days = (today - buy_date).days
-
-        years = delta_days // 365
-        months = (delta_days % 365) // 30
-        days = (delta_days % 365) % 30
-
-        parts = []
-        if years > 0:
-            parts.append(f"{years} year{'s' if years > 1 else ''}")
-        if months > 0:
-            parts.append(f"{months} month{'s' if months > 1 else ''}")
-        if days > 0:
-            parts.append(f"{days} day{'s' if days > 1 else ''}")
-
-        return ", ".join(parts) if parts else "0 days"
-    except:
+    buy_date = parse_date(buy_date_str)
+    if not buy_date:
         return None
+
+    today = datetime.now().date()
+    delta_days = (today - buy_date).days
+
+    years = delta_days // 365
+    months = (delta_days % 365) // 30
+    days = (delta_days % 365) % 30
+
+    parts = []
+    if years > 0:
+        parts.append(f"{years} year{'s' if years > 1 else ''}")
+    if months > 0:
+        parts.append(f"{months} month{'s' if months > 1 else ''}")
+    if days > 0:
+        parts.append(f"{days} day{'s' if days > 1 else ''}")
+
+    return ", ".join(parts) if parts else "0 days"
 
 def send_initial_holdings_summary(active_data, user_map):
     print("[DEBUG] Sending initial holdings summary...")
@@ -187,26 +194,25 @@ def send_initial_holdings_summary(active_data, user_map):
     except Exception as e:
         print(f"[DEBUG] Error sending initial summary: {e}")
 
+# === Main Loop ===
 def main_loop():
-    global alert_counters, initial_holdings_sent
+    global alert_counters
+    initial_holdings_sent = False
     while True:
-        print(
-            f"\n[DEBUG] Scan started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        )
+        print(f"\n[DEBUG] Scan started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         try:
             ath_data, user_map, active_data, alert_log_sheet, alert_log_data = load_sheets()
 
-            # --- Send initial summary only once ---
+            # Send initial summary once
             if not initial_holdings_sent:
                 send_initial_holdings_summary(active_data, user_map)
                 initial_holdings_sent = True
 
-            # --- BUY SIGNAL LOGIC ---
+            # --- BUY ALERTS ---
             now = datetime.now()
             year_month = now.strftime("%Y-%m")
             stock_symbols = [row["Stock"] for row in ath_data if row["Stock"]]
             prices = get_prices(stock_symbols)
-            print("[DEBUG] All prices fetched.")
 
             for row in ath_data:
                 stock = row["Stock"]
@@ -232,19 +238,16 @@ def main_loop():
                             if chat_id:
                                 send_telegram_alert(chat_id, msg)
                             if email:
-                                send_email_alert(email,
-                                                 f"BUY ALERT for {stock}", msg)
+                                send_email_alert(email, f"BUY ALERT for {stock}", msg)
                             alert_counters[alert_key] = prev_count + 1
                         if alert_counters[alert_key] == MAX_ALERTS_PER_TRIGGER:
                             log_buy_alert_month(alert_log_sheet, user_name, stock, year_month)
 
             print("[DEBUG] Buy Signal Monitor Cycle Done.")
 
-            # --- SELL SIGNAL LOGIC ---
+            # --- SELL ALERTS ---
             print("[DEBUG] Running Sell Alert Logic...")
-            ah_symbols = [
-                row["Stock"] for row in active_data if row.get("Stock")
-            ]
+            ah_symbols = [row["Stock"] for row in active_data if row.get("Stock")]
             ah_prices = get_prices(ah_symbols)
             for row in active_data:
                 stock = row.get("Stock")
@@ -262,9 +265,6 @@ def main_loop():
                     sma_10m = float(row.get("SMA_10M") or 0)
                     sma_20m = float(row.get("SMA_20M") or 0)
                 except:
-                    print(
-                        f"[DEBUG] Error getting SMAs for {stock}: {row.get('SMA_10M')}, {row.get('SMA_20M')}"
-                    )
                     continue
                 user_name = row.get("Name")
                 chat_id = user_map[user_name]["telegram_id"] if user_name in user_map else ""
@@ -287,19 +287,14 @@ def main_loop():
                         if chat_id:
                             send_telegram_alert(chat_id, msg)
                         if email:
-                            send_email_alert(email, f"SELL ALERT for {stock}",
-                                             msg)
-                        print(f"[DEBUG] Sent sell alert for {stock} to {user_name}")
+                            send_email_alert(email, f"SELL ALERT for {stock}", msg)
                         alert_counters[alert_key] = prev_count + 1
 
             print("[DEBUG] Sell Signal Monitor Cycle Done.")
-
         except Exception as e:
             print(f"[DEBUG] Exception in main loop: {e}")
 
-        print(
-            f"[DEBUG] Waiting {CHECK_INTERVAL//60} minutes before next scan...\n"
-        )
+        print(f"[DEBUG] Waiting {CHECK_INTERVAL//60} minutes before next scan...\n")
         time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
