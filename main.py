@@ -121,14 +121,54 @@ def log_buy_alert_month(alert_log_sheet, user, stock, year_month):
         user, stock, year_month, "buy", datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ])
 
+# --- NEW FEATURE: Initial Holdings Summary ---
+initial_holdings_sent = False
+
+def send_initial_holdings_summary(active_data, user_map):
+    print("[DEBUG] Sending initial holdings summary...")
+    try:
+        ah_symbols = [row["Stock"] for row in active_data if row.get("Stock")]
+        prices = get_prices(ah_symbols)
+        for row in active_data:
+            stock = row.get("Stock")
+            if not stock:
+                continue
+            live_price = prices.get(stock)
+            try:
+                buy_price = float(row.get("Buy Price") or 0)
+                sma_10m = float(row.get("SMA_10M") or 0)
+                sma_20m = float(row.get("SMA_20M") or 0)
+            except:
+                continue
+            user_name = row.get("Name")
+            chat_id = user_map[user_name]["telegram_id"] if user_name in user_map else ""
+            if not chat_id:
+                continue
+            msg = (
+                f"📊 *ACTIVE HOLDING* for {stock}\n"
+                f"Live: ₹{live_price}\n"
+                f"Buy Price: ₹{buy_price}\n"
+                f"SMA 20M: ₹{sma_20m}\n"
+                f"SMA 10M: ₹{sma_10m}"
+            )
+            send_telegram_alert(chat_id, msg)
+            print(f"[DEBUG] Sent initial summary for {stock} to {user_name}")
+    except Exception as e:
+        print(f"[DEBUG] Error sending initial summary: {e}")
+
 def main_loop():
-    global alert_counters
+    global alert_counters, initial_holdings_sent
     while True:
         print(
             f"\n[DEBUG] Scan started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
         try:
             ath_data, user_map, active_data, alert_log_sheet, alert_log_data = load_sheets()
+
+            # --- Send initial summary only once ---
+            if not initial_holdings_sent:
+                send_initial_holdings_summary(active_data, user_map)
+                initial_holdings_sent = True
 
             # --- BUY SIGNAL LOGIC ---
             now = datetime.now()
