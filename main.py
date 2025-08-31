@@ -125,11 +125,25 @@ def log_buy_alert_month(alert_log_sheet, user, stock, year_month):
 initial_holdings_sent = False
 
 def calculate_holding_days(buy_date_str):
-    """Calculate how many days a stock has been held."""
+    """Calculate human-readable holding duration like '2 years, 3 months, 5 days'."""
     try:
         buy_date = datetime.strptime(buy_date_str, "%Y-%m-%d").date()
         today = datetime.now().date()
-        return (today - buy_date).days
+        delta_days = (today - buy_date).days
+
+        years = delta_days // 365
+        months = (delta_days % 365) // 30
+        days = (delta_days % 365) % 30
+
+        parts = []
+        if years > 0:
+            parts.append(f"{years} year{'s' if years > 1 else ''}")
+        if months > 0:
+            parts.append(f"{months} month{'s' if months > 1 else ''}")
+        if days > 0:
+            parts.append(f"{days} day{'s' if days > 1 else ''}")
+
+        return ", ".join(parts) if parts else "0 days"
     except:
         return None
 
@@ -152,7 +166,7 @@ def send_initial_holdings_summary(active_data, user_map):
 
             buy_date = row.get("Buy Date", "")
             holding_days = calculate_holding_days(buy_date)
-            holding_info = f"{holding_days} days" if holding_days is not None else "N/A"
+            holding_info = holding_days if holding_days is not None else "N/A"
 
             user_name = row.get("Name")
             chat_id = user_map[user_name]["telegram_id"] if user_name in user_map else ""
